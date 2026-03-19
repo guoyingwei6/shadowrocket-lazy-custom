@@ -6,6 +6,7 @@ Merge upstream Shadowrocket lazy_group.conf with custom overrides.
 - Applies key-value overrides from custom/general.conf to [General]
 - Inserts custom rules from custom/rules.conf before FINAL in [Rule]
 - Appends custom URL rewrites from custom/url_rewrite.conf to [URL Rewrite]
+- Removes proxy groups listed in custom/remove_groups.conf and redirects their rules to PROXY
 """
 
 import re
@@ -117,6 +118,54 @@ def insert_rules_before_final(body: str) -> str:
     return "".join(result)
 
 
+def load_remove_groups() -> set[str]:
+    """Load group names to remove (case-insensitive)."""
+    text = load_custom("remove_groups.conf")
+    if not text:
+        return set()
+    groups = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            groups.add(line.lower())
+    return groups
+
+
+def remove_proxy_groups(body: str, groups: set[str]) -> str:
+    """Remove specified proxy group definitions from [Proxy Group] section."""
+    if not groups:
+        return body
+    lines = body.splitlines(keepends=True)
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and " = " in stripped:
+            name = stripped.split(" = ", 1)[0].strip()
+            if name.lower() in groups:
+                continue
+        result.append(line)
+    return "".join(result)
+
+
+def replace_rule_policies(body: str, groups: set[str]) -> str:
+    """Replace policy references to removed groups with PROXY in [Rule] section."""
+    if not groups:
+        return body
+    lines = body.splitlines(keepends=True)
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            parts = stripped.split(",")
+            if len(parts) >= 2:
+                policy = parts[-1].strip()
+                if policy.lower() in groups:
+                    parts[-1] = "PROXY"
+                    line = ",".join(parts) + "\n"
+        result.append(line)
+    return "".join(result)
+
+
 def append_url_rewrites(body: str) -> str:
     """Append custom URL rewrite rules to [URL Rewrite] section."""
     custom_rewrites = load_custom("url_rewrite.conf")
@@ -129,12 +178,16 @@ def append_url_rewrites(body: str) -> str:
 def merge() -> str:
     upstream = download_upstream()
     sections = parse_sections(upstream)
+    remove_groups = load_remove_groups()
 
     result_sections = []
     for name, body in sections:
         if name == "General":
             body = apply_general_overrides(body)
+        elif name == "Proxy Group":
+            body = remove_proxy_groups(body, remove_groups)
         elif name == "Rule":
+            body = replace_rule_policies(body, remove_groups)
             body = insert_rules_before_final(body)
         elif name == "URL Rewrite":
             body = append_url_rewrites(body)
