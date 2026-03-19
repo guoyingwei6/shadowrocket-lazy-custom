@@ -19,7 +19,7 @@ UPSTREAM_URL = (
 
 ROOT = Path(__file__).resolve().parent.parent
 CUSTOM_DIR = ROOT / "custom"
-OUTPUT = ROOT / "lazy_group.conf"
+OUTPUT = ROOT / "lazy_group_custom.conf"
 
 
 def download_upstream() -> str:
