@@ -6,7 +6,7 @@ Merge upstream Shadowrocket lazy_group.conf with custom overrides.
 - Applies key-value overrides from custom/general.conf to [General]
 - Inserts custom rules from custom/rules.conf before FINAL in [Rule]
 - Appends custom URL rewrites from custom/url_rewrite.conf to [URL Rewrite]
-- Removes proxy groups listed in custom/remove_groups.conf and redirects their rules to PROXY
+- Removes proxy groups listed in custom/remove_groups.conf and their associated rules
 """
 
 import re
@@ -147,8 +147,8 @@ def remove_proxy_groups(body: str, groups: set[str]) -> str:
     return "".join(result)
 
 
-def replace_rule_policies(body: str, groups: set[str]) -> str:
-    """Replace policy references to removed groups with PROXY in [Rule] section."""
+def remove_rules_for_groups(body: str, groups: set[str]) -> str:
+    """Remove rule lines whose policy references a removed group."""
     if not groups:
         return body
     lines = body.splitlines(keepends=True)
@@ -160,8 +160,7 @@ def replace_rule_policies(body: str, groups: set[str]) -> str:
             if len(parts) >= 2:
                 policy = parts[-1].strip()
                 if policy.lower() in groups:
-                    parts[-1] = "PROXY"
-                    line = ",".join(parts) + "\n"
+                    continue
         result.append(line)
     return "".join(result)
 
@@ -187,7 +186,7 @@ def merge() -> str:
         elif name == "Proxy Group":
             body = remove_proxy_groups(body, remove_groups)
         elif name == "Rule":
-            body = replace_rule_policies(body, remove_groups)
+            body = remove_rules_for_groups(body, remove_groups)
             body = insert_rules_before_final(body)
         elif name == "URL Rewrite":
             body = append_url_rewrites(body)
