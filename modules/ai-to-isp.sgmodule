@@ -1,0 +1,13 @@
+#!name=AI 走家宽
+#!desc=强制 AI 流量走家宽节点，模块规则优先于配置规则，不受订阅/配置更新影响
+
+[Proxy]
+
+[Rule]
+RULE-SET,https://raw.githubusercontent.com/iab0x00/ProxyRules/main/Rule/AI.txt,家宽IP
+RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/OpenAI/OpenAI.list,家宽IP
+RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/Claude/Claude.list,家宽IP
+RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/Gemini/Gemini.list,家宽IP
+DOMAIN-SUFFIX,x.ai,家宽IP
+DOMAIN-SUFFIX,grok.com,家宽IP
+DOMAIN-SUFFIX,perplexity.ai,家宽IP
