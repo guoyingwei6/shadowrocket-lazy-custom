@@ -1,7 +1,6 @@
 #!name=AI 走家宽
 #!desc=强制 AI 流量走家宽节点，模块规则优先于配置规则，不受订阅/配置更新影响
-
-[Proxy]
+#!note=需在小火箭本地配置中自行添加名为「家宽IP」的节点
 
 [Rule]
 RULE-SET,https://raw.githubusercontent.com/iab0x00/ProxyRules/main/Rule/AI.txt,家宽IP
