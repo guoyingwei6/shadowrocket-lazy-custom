@@ -175,34 +175,11 @@ def append_url_rewrites(body: str) -> str:
     return body.rstrip("\n") + "\n\n# --- Custom URL Rewrites ---\n" + custom_rewrites + "\n"
 
 
-HEADER_TEMPLATE = """\
-# ============================================================================
-# Shadowrocket 懒人分组 · 自定义增强版
-# 作者：Yingwei Guo (@guoyingwei6)
-# 更新日期：{date}
-# 上游：LOWERTOP/Shadowrocket lazy_group.conf
-# 仓库：https://github.com/guoyingwei6/shadowrocket-lazy-custom
-#
-# 核心特性：
-# 1. 每日自动拉取 LOWERTOP 懒人分组最新配置并合并自定义规则
-# 2. 自建 DoH + 多公共 DoH 并发竞速，阿里/腾讯明文 DNS 兜底，不走运营商
-# 3. AI 多重规则保障：iab0x00 + blackmatrix7 + 手动域名兜底
-# 4. 24.7 万条去广告规则 (blackmatrix7 Advertising RULE-SET)
-# 5. 230 条学术域名强制直连 (blackmatrix7 Scholar RULE-SET)
-# 6. 精简策略组：裁剪 8 个不常用流媒体组，UI 清爽
-# 7. IPv6 关闭 + QUIC 屏蔽 + .cn 域名快速直连
-#
-# 更新日志：
-# 2026-03-22  自建 DoH 加密 DNS + 阿里/腾讯明文 DNS 兜底，杜绝运营商 DNS
-# 2026-03-19  初始版本
-# ============================================================================
-"""
-
-
 def make_header() -> str:
+    template = (CUSTOM_DIR / "header.conf").read_text("utf-8")
     beijing = timezone(timedelta(hours=8))
     date = datetime.now(beijing).strftime("%Y-%m-%d")
-    return HEADER_TEMPLATE.format(date=date)
+    return template.format(date=date)
 
 
 def merge() -> str:
