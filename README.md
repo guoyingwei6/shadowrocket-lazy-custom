@@ -7,7 +7,7 @@
 ## 核心特性
 
 1. **每日自动拉取 LOWERTOP 懒人分组最新配置** — 北京时间 18:30 自动合并自定义规则后发布，无需手动维护
-2. **AI 多重规则保障** — 叠加 iab0x00 + blackmatrix7 (OpenAI/Claude/Gemini) 三套 AI 规则集 + 手动域名兜底，确保 AI 流量无遗漏
+2. **AI 多重规则保障** — 叠加 iab0x00 + blackmatrix7 (OpenAI/Claude/Gemini) 三套 AI 规则集 + 手动域名兜底，确保 AI 流量无遗漏；iab0x00 同时覆盖 Apple Intelligence / Siri / iCloud Private Relay 相关域名
 3. **24.7 万条去广告** — 一行 RULE-SET 引用 blackmatrix7 Advertising 规则集，零膨胀覆盖全网广告域名
 4. **230 条学术域名直连** — 引用 blackmatrix7 Scholar 规则集，覆盖 Nature/IEEE/Springer/Elsevier/JSTOR/Web of Science/Scopus/Z-Library/Zotero 等主流学术平台，保障校园网机构 IP 访问
 5. **精简策略组** — 裁剪 YouTube/Netflix/Disney+ 等 8 个不常用的流媒体策略组，保持 UI 清爽，域名规则仍通过 Global 规则集和 FINAL 兜底
@@ -42,7 +42,7 @@
 | IPv6 | `true` | `false` |
 | QUIC 屏蔽规则 | 注释掉 | 启用 |
 | 去广告 | 无 | blackmatrix7 Advertising (24.7 万条) |
-| AI 规则 | iab0x00 单一来源 | iab0x00 + blackmatrix7 三套 + 手动兜底 |
+| AI 规则 | iab0x00 单一来源 | iab0x00 + blackmatrix7 三套 + 手动兜底（含 Apple Intelligence/Relay）|
 | 学术直连 | 无 | blackmatrix7 Scholar (230 条) |
 | Gmail 分流 | 无 | 指向谷歌服务策略组 |
 | .cn 直连 | 依赖 GEOIP | 域名层面直接短路 |
