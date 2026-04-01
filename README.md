@@ -11,8 +11,10 @@
 3. **24.7 万条去广告** — 一行 RULE-SET 引用 blackmatrix7 Advertising 规则集，零膨胀覆盖全网广告域名
 4. **230 条学术域名直连** — 引用 blackmatrix7 Scholar 规则集，覆盖 Nature/IEEE/Springer/Elsevier/JSTOR/Web of Science/Scopus/Z-Library/Zotero 等主流学术平台，保障校园网机构 IP 访问
 5. **精简策略组** — 裁剪 YouTube/Netflix/Disney+ 等 8 个不常用的流媒体策略组，保持 UI 清爽，域名规则仍通过 Global 规则集和 FINAL 兜底
-6. **QUIC 屏蔽 + IPv6 关闭** — 强制回退 HTTP/2 提升代理兼容性，关闭 IPv6 防止泄漏
+6. **代理连接 QUIC 屏蔽 + IPv6 关闭** — 仅对走代理的连接屏蔽 QUIC（强制回退 HTTP/2），直连流量可正常使用 HTTP/3；关闭 IPv6 防止泄漏
 7. **.cn 域名快速直连** — 域名层面短路所有 .cn 请求，免去 GEOIP DNS 查询开销
+8. **WebRTC 真实 IP 防泄漏** — `stun-response-ip` 返回虚假 IP，防止 WebRTC STUN 绕过代理暴露真实 IP
+9. **DNS 安全加固** — 禁用系统 DNS 回落 (`dns-fallback-system=false`)，直连域名 DNS 失败不经代理 (`dns-direct-fallback-proxy=false`)，杜绝 DNS 泄漏
 
 ## 订阅地址
 
@@ -40,18 +42,21 @@
 | 项目 | 上游 (LOWERTOP) | 本配置 |
 |------|-----------------|--------|
 | IPv6 | `true` | `false` |
-| QUIC 屏蔽规则 | 注释掉 | 启用 |
+| QUIC 屏蔽 | 注释掉 | `block-quic=all-proxy`，仅屏蔽代理连接，直连可用 HTTP/3 |
 | 去广告 | 无 | blackmatrix7 Advertising (24.7 万条) |
 | AI 规则 | iab0x00 单一来源 | iab0x00 + blackmatrix7 三套 + 手动兜底（含 Apple Intelligence/Relay）|
 | 学术直连 | 无 | blackmatrix7 Scholar (230 条) |
 | Gmail 分流 | 无 | 指向谷歌服务策略组 |
 | .cn 直连 | 依赖 GEOIP | 域名层面直接短路 |
 | 流媒体策略组 | YouTube/Netflix 等 8 个 | 已裁剪，走 PROXY 兜底 |
+| WebRTC 防泄漏 | 未启用 | `stun-response-ip` 返回虚假 IP |
+| DNS 安全 | 默认 | 禁用系统 DNS 回落，直连 DNS 失败不走代理 |
 
 ## 更新日志
 
 | 日期 | 内容 |
 |------|------|
+| 2026-04-01 | WebRTC 真实 IP 防泄漏 (`stun-response-ip`)；修正 QUIC 屏蔽范围（仅代理连接，直连保留 HTTP/3）；DNS 安全加固（禁用系统 DNS 回落、直连 DNS 不走代理）|
 | 2026-03-22 | 自建 DoH 加密 DNS + 阿里/腾讯明文 DNS 兜底，杜绝运营商 DNS；头部模板提取到 `custom/header.conf` |
 | 2026-03-19 | 初始版本：自动合并框架 + AI/学术/去广告规则 + 策略组精简 |
 
