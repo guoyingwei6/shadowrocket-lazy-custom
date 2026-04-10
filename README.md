@@ -14,7 +14,7 @@
 6. **代理连接 QUIC 屏蔽 + IPv6 关闭** — 仅对走代理的连接屏蔽 QUIC（强制回退 HTTP/2），直连流量可正常使用 HTTP/3；关闭 IPv6 防止泄漏
 7. **.cn 域名快速直连** — 域名层面短路所有 .cn 请求，免去 GEOIP DNS 查询开销
 8. **WebRTC 真实 IP 防泄漏** — `stun-response-ip` 返回虚假 IP，防止 WebRTC STUN 绕过代理暴露真实 IP
-9. **DNS 安全加固** — 禁用系统 DNS 回落 (`dns-fallback-system=false`)，直连域名 DNS 失败不经代理 (`dns-direct-fallback-proxy=false`)，杜绝 DNS 泄漏
+9. **DNS 防泄漏加固** — 仅使用自建 DoH + Cloudflare 加密解析，移除阿里/腾讯 DoH（其出口 IP 走中国移动骨干，被泄漏检测工具误判为运营商 DNS）；不设 fallback（明文被运营商透明代理劫持，中国 DoH 同样泄漏）；禁用系统 DNS 回落与直连 DNS 代理回退
 
 ## 订阅地址
 
@@ -50,12 +50,13 @@
 | .cn 直连 | 依赖 GEOIP | 域名层面直接短路 |
 | 流媒体策略组 | YouTube/Netflix 等 8 个 | 已裁剪，走 PROXY 兜底 |
 | WebRTC 防泄漏 | 未启用 | `stun-response-ip` 返回虚假 IP |
-| DNS 安全 | 默认 | 禁用系统 DNS 回落，直连 DNS 失败不走代理 |
+| DNS 防泄漏 | 明文回落 | 仅自建 DoH + Cloudflare；移除阿里/腾讯 DoH；不设 fallback；禁用系统 DNS 回落 |
 
 ## 更新日志
 
 | 日期 | 内容 |
 |------|------|
+| 2026-04-10 | DNS 防泄漏加固：移除阿里/腾讯 DoH（出口 IP 走移动骨干被误判为运营商 DNS），去除 fallback（明文被透明代理劫持），仅保留自建 DoH + Cloudflare |
 | 2026-04-01 | WebRTC 真实 IP 防泄漏 (`stun-response-ip`)；修正 QUIC 屏蔽范围（仅代理连接，直连保留 HTTP/3）；DNS 安全加固（禁用系统 DNS 回落、直连 DNS 不走代理）|
 | 2026-03-22 | 自建 DoH 加密 DNS + 阿里/腾讯明文 DNS 兜底，杜绝运营商 DNS；头部模板提取到 `custom/header.conf` |
 | 2026-03-19 | 初始版本：自动合并框架 + AI/学术/去广告规则 + 策略组精简 |
