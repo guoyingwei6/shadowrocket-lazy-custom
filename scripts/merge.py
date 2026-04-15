@@ -16,7 +16,9 @@ Merge upstream Shadowrocket lazy_group.conf with custom overrides.
 - Removes proxy groups listed in custom/remove_groups.conf and their associated rules
 """
 
-import re
+import os
+import tempfile
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -34,28 +36,43 @@ OUTPUT = ROOT / "lazy_group_custom.conf"
 _GENERAL_DELETE = "__DELETE__"
 
 # Divider in rules.conf separating top-inserted rules from pre-FINAL rules.
+# Must appear as an exact standalone line (not inside a comment).
 _RULES_SPLIT_MARKER = "# --- pre-final ---"
+
+# Trailing rule options that are not the policy name.
+_RULE_OPTIONS = {"no-resolve", "pre-matching", "extended-matching"}
 
 
 def download_upstream() -> str:
-    with urllib.request.urlopen(UPSTREAM_URL) as resp:
-        return resp.read().decode("utf-8")
+    """Download upstream config with a 30-second timeout and clear error messages."""
+    try:
+        with urllib.request.urlopen(UPSTREAM_URL, timeout=30) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"[merge] HTTP {e.code} downloading upstream: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise SystemExit(f"[merge] Network error downloading upstream: {e.reason}") from e
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise SystemExit(f"[merge] Upstream response is not valid UTF-8: {e}") from e
 
 
 def parse_sections(text: str) -> list[tuple[str, str]]:
     """Parse config into [(section_name, section_body), ...].
 
     Content before the first section header is stored with section_name=''.
+    Section names are stripped to tolerate minor upstream formatting differences.
     """
     sections: list[tuple[str, str]] = []
     current_name = ""
     current_lines: list[str] = []
 
     for line in text.splitlines(keepends=True):
-        m = re.match(r"^\[(.+)\]\s*$", line)
-        if m:
+        # Match lines like "[General]" or "[Rule]", strip name for robustness
+        if line.startswith("[") and line.rstrip().endswith("]"):
             sections.append((current_name, "".join(current_lines)))
-            current_name = m.group(1)
+            current_name = line.rstrip()[1:-1].strip()
             current_lines = [line]
         else:
             current_lines.append(line)
@@ -75,9 +92,8 @@ def apply_general_overrides(body: str) -> str:
     """Override key=value pairs in [General] section.
 
     Keys whose value is '__DELETE__' are removed from the upstream config
-    entirely, allowing deletion of keys that have no neutral override value
-    (e.g. fallback-dns-server cannot be "disabled" by setting a value —
-    it must be absent from the config).
+    entirely. All occurrences of a key are replaced/removed (not just the
+    first), so duplicate upstream keys are handled correctly.
     """
     overrides_text = load_custom("general.conf")
     if not overrides_text:
@@ -96,14 +112,17 @@ def apply_general_overrides(body: str) -> str:
         return body
 
     result_lines = []
+    seen_keys: set[str] = set()
+
     for line in body.splitlines(keepends=True):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
             if key in overrides:
-                val = overrides.pop(key)
+                seen_keys.add(key)
+                val = overrides[key]
                 if val == _GENERAL_DELETE:
-                    # Drop this upstream key entirely
+                    # Remove this key from the upstream config entirely
                     continue
                 result_lines.append(f"{key} = {val}\n")
                 continue
@@ -111,7 +130,7 @@ def apply_general_overrides(body: str) -> str:
 
     # Append overrides that had no matching upstream key (skip __DELETE__ entries)
     for key, val in overrides.items():
-        if val != _GENERAL_DELETE:
+        if key not in seen_keys and val != _GENERAL_DELETE:
             result_lines.append(f"{key} = {val}\n")
 
     return "".join(result_lines)
@@ -120,24 +139,42 @@ def apply_general_overrides(body: str) -> str:
 def load_rules_conf() -> tuple[str, str]:
     """Load rules.conf and split into (top_rules, prefinal_rules).
 
-    Rules above '# --- pre-final ---' are inserted at the top of [Rule],
-    before all upstream service rules, so they are evaluated first.
-    Rules below the marker are inserted immediately before FINAL.
+    Splits on the first line whose stripped content is exactly
+    '# --- pre-final ---'. A substring match is intentionally avoided
+    to prevent false matches inside comment text that mentions the marker.
+
+    Raises ValueError if the marker appears more than once.
+    Rules above the marker are inserted at the top of [Rule].
+    Rules below are inserted before FINAL.
     Without the marker, all rules go before FINAL (backwards compatible).
     """
     text = load_custom("rules.conf")
     if not text:
         return "", ""
-    if _RULES_SPLIT_MARKER in text:
-        idx = text.index(_RULES_SPLIT_MARKER)
-        top = text[:idx].strip()
-        prefinal = text[idx + len(_RULES_SPLIT_MARKER):].strip()
-        return top, prefinal
-    return "", text
+
+    lines = text.splitlines()
+    marker_indexes = [
+        i for i, line in enumerate(lines)
+        if line.strip() == _RULES_SPLIT_MARKER
+    ]
+
+    if not marker_indexes:
+        return "", text
+
+    if len(marker_indexes) > 1:
+        raise ValueError(
+            f"rules.conf contains {len(marker_indexes)} occurrences of "
+            f"{_RULES_SPLIT_MARKER!r}; expected exactly one."
+        )
+
+    idx = marker_indexes[0]
+    top = "\n".join(lines[:idx]).strip()
+    prefinal = "\n".join(lines[idx + 1:]).strip()
+    return top, prefinal
 
 
 def insert_rules_at_top(body: str, top_rules: str) -> str:
-    """Insert rules at the very top of [Rule] section, right after its header line.
+    """Insert rules at the very top of [Rule] section, after the section header.
 
     Guarantees top_rules are evaluated before any upstream service rules.
     Intended for: advertising REJECT, Scholar DIRECT, .cn DIRECT.
@@ -149,7 +186,8 @@ def insert_rules_at_top(body: str, top_rules: str) -> str:
     inserted = False
     for line in lines:
         result.append(line)
-        if not inserted and re.match(r"^\[Rule\]$", line.strip()):
+        # Exact string match — no regex needed for a literal section header
+        if not inserted and line.strip() == "[Rule]":
             result.append("\n# --- Top Custom Rules ---\n")
             result.append(top_rules + "\n")
             result.append("\n")
@@ -196,19 +234,35 @@ def load_remove_groups() -> set[str]:
 
 
 def remove_proxy_groups(body: str, groups: set[str]) -> str:
-    """Remove specified proxy group definitions from [Proxy Group] section."""
+    """Remove specified proxy group definitions from [Proxy Group] section.
+
+    Uses partition("=") to tolerate upstream spacing variations like
+    'YouTube=select,...' in addition to the standard 'YouTube = select,...'.
+    """
     if not groups:
         return body
     lines = body.splitlines(keepends=True)
     result = []
     for line in lines:
         stripped = line.strip()
-        if stripped and not stripped.startswith("#") and " = " in stripped:
-            name = stripped.split(" = ", 1)[0].strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            name = stripped.partition("=")[0].strip()
             if name.lower() in groups:
                 continue
         result.append(line)
     return "".join(result)
+
+
+def _rule_policy(parts: list[str]) -> str:
+    """Extract the policy name from a split rule line.
+
+    Trailing options like 'no-resolve', 'pre-matching', 'extended-matching'
+    are not policy names; skip them to find the actual policy field.
+    """
+    for part in reversed(parts):
+        if part.strip().lower() not in _RULE_OPTIONS:
+            return part.strip()
+    return parts[-1].strip()
 
 
 def remove_rules_for_groups(body: str, groups: set[str]) -> str:
@@ -225,10 +279,8 @@ def remove_rules_for_groups(body: str, groups: set[str]) -> str:
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
             parts = stripped.split(",")
-            if len(parts) >= 2:
-                policy = parts[-1].strip()
-                if policy.lower() in groups:
-                    continue
+            if len(parts) >= 2 and _rule_policy(parts).lower() in groups:
+                continue
         result.append(line)
     return "".join(result)
 
@@ -253,10 +305,15 @@ def append_url_rewrites(body: str) -> str:
 
 
 def make_header() -> str:
+    """Build the config file header, substituting {date} with today's Beijing date.
+
+    Uses str.replace instead of str.format so that literal braces in
+    header.conf never cause a KeyError.
+    """
     template = (CUSTOM_DIR / "header.conf").read_text("utf-8")
     beijing = timezone(timedelta(hours=8))
     date = datetime.now(beijing).strftime("%Y-%m-%d")
-    return template.format(date=date)
+    return template.replace("{date}", date)
 
 
 def merge() -> str:
@@ -284,7 +341,16 @@ def merge() -> str:
 
 def main():
     merged = merge()
-    OUTPUT.write_text(merged, encoding="utf-8")
+    # Write to a temp file in the same directory, then atomically replace
+    # the output so a mid-write interruption never leaves a partial file.
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=OUTPUT.parent, prefix=".merge_tmp_")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(merged)
+        os.replace(tmp_path, OUTPUT)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
     print(f"Merged config written to {OUTPUT}")
 
 
