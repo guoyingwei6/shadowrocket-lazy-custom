@@ -21,6 +21,7 @@ import re
 import tempfile
 import urllib.error
 import urllib.request
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -99,13 +100,24 @@ def parse_sections(text: str) -> list[tuple[str, str]]:
 
 
 def validate_sections(sections: list[tuple[str, str]]) -> None:
-    """Raise SystemExit if any required section is missing from the upstream config."""
-    present = {name for name, _ in sections if name}
+    """Raise SystemExit if any required section is missing or duplicated."""
+    names = [name for name, _ in sections if name]
+    present = set(names)
+
     missing = _REQUIRED_SECTIONS - present
     if missing:
         raise SystemExit(
             f"[merge] Upstream config is missing required sections: "
             f"{', '.join(sorted(missing))}. Aborting to avoid a broken output."
+        )
+
+    # Duplicate required sections would cause custom rules to be inserted twice
+    counts = Counter(names)
+    duplicates = {name for name, count in counts.items() if count > 1} & _REQUIRED_SECTIONS
+    if duplicates:
+        raise SystemExit(
+            f"[merge] Upstream config contains duplicate sections: "
+            f"{', '.join(sorted(duplicates))}. Aborting to avoid double-inserting custom rules."
         )
 
 
@@ -214,7 +226,9 @@ def insert_rules_at_top(body: str, top_rules: str) -> str:
         return body
     lines = body.splitlines(keepends=True)
     if not lines:
-        return body
+        # An empty Rule section body is an invariant violation — abort rather
+        # than silently producing malformed output.
+        raise SystemExit("[merge] insert_rules_at_top: Rule section body is empty.")
     # Invariant: lines[0] must be the section header (e.g. "[Rule]\n").
     # merge() only calls this function for the Rule section, so parse_sections()
     # guarantees lines[0] is the header. Assert here to catch future regressions.
@@ -327,23 +341,39 @@ def remove_rules_for_groups(body: str, groups: set[str]) -> str:
     return "".join(result)
 
 
-def append_url_rewrites(body: str) -> str:
-    """Append custom URL rewrite rules to [URL Rewrite] section.
-
-    Silently skips the file when it contains only comments or blank lines,
-    avoiding an empty placeholder block in the generated config.
-    """
+def _url_rewrite_raw_content() -> str:
+    """Return url_rewrite.conf content if it has real (non-comment) lines, else ''."""
     raw = load_custom("url_rewrite.conf")
     if not raw:
-        return body
-    # Only append if at least one real (non-comment, non-blank) line exists
+        return ""
     has_content = any(
         line.strip() and not line.strip().startswith("#")
         for line in raw.splitlines()
     )
-    if not has_content:
+    return raw if has_content else ""
+
+
+def append_url_rewrites(body: str) -> str:
+    """Append custom URL rewrite rules to an existing [URL Rewrite] section.
+
+    Silently skips when url_rewrite.conf contains only comments or blank lines.
+    """
+    raw = _url_rewrite_raw_content()
+    if not raw:
         return body
     return body.rstrip("\n") + "\n\n# --- Custom URL Rewrites ---\n" + raw + "\n"
+
+
+def synthesize_url_rewrite_section() -> str:
+    """Build a new [URL Rewrite] section from url_rewrite.conf.
+
+    Called when the upstream config has no [URL Rewrite] section but custom
+    rewrite content exists; the new section is appended to the output.
+    """
+    raw = _url_rewrite_raw_content()
+    if not raw:
+        return ""
+    return "[URL Rewrite]\n# --- Custom URL Rewrites ---\n" + raw + "\n"
 
 
 def make_header() -> str:
@@ -358,14 +388,42 @@ def make_header() -> str:
     return template.replace("{date}", date)
 
 
+def validate_custom_rules_groups(
+    top_rules: str, prefinal_rules: str, remove_groups: set[str]
+) -> None:
+    """Raise SystemExit if any custom rule targets a group that is being removed.
+
+    Custom rules are inserted AFTER remove_rules_for_groups() runs, so they
+    would not be cleaned up automatically. Catch this early to prevent a rule
+    referencing a non-existent group from silently ending up in the output.
+    """
+    if not remove_groups:
+        return
+    for label, text in [("top rules", top_rules), ("pre-final rules", prefinal_rules)]:
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                parts = stripped.split(",")
+                if len(parts) >= 2:
+                    policy = _rule_policy(parts)
+                    if policy.casefold() in remove_groups:
+                        raise SystemExit(
+                            f"[merge] Custom {label} contain a rule targeting "
+                            f"removed group {policy!r}: {stripped!r}. "
+                            f"Remove the rule or the group from remove_groups.conf."
+                        )
+
+
 def merge() -> str:
     upstream = download_upstream()
     sections = parse_sections(upstream)
     validate_sections(sections)
     remove_groups = load_remove_groups()
     top_rules, prefinal_rules = load_rules_conf()
+    validate_custom_rules_groups(top_rules, prefinal_rules, remove_groups)
 
     result_sections = []
+    url_rewrite_handled = False
     for name, body in sections:
         if name == "General":
             body = apply_general_overrides(body)
@@ -377,7 +435,15 @@ def merge() -> str:
             body = insert_rules_before_final(body, prefinal_rules)
         elif name == "URL Rewrite":
             body = append_url_rewrites(body)
+            url_rewrite_handled = True
         result_sections.append(body)
+
+    # If upstream had no [URL Rewrite] section but custom content exists,
+    # synthesize and append the section rather than silently discarding it.
+    if not url_rewrite_handled:
+        synthetic = synthesize_url_rewrite_section()
+        if synthetic:
+            result_sections.append(synthetic)
 
     return make_header() + "\n" + "".join(result_sections)
 
