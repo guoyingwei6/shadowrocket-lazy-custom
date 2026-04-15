@@ -12,8 +12,8 @@
 | 文件 | 作用 |
 |------|------|
 | `header.conf` | 配置文件头部模板（核心特性、更新日志等），支持 `{date}` 占位符自动替换为构建日期 |
-| `general.conf` | `[General]` 键值覆盖（如 dns-server、fallback-dns-server） |
-| `rules.conf` | 自定义分流规则（插入到 FINAL 之前） |
+| `general.conf` | `[General]` 键值覆盖；值设为 `__DELETE__` 可将该键从上游配置中删除 |
+| `rules.conf` | 自定义分流规则；`# --- pre-final ---` 分隔符以上插入 `[Rule]` 最前端，以下插入 FINAL 之前 |
 | `url_rewrite.conf` | 额外 URL Rewrite 规则 |
 | `remove_groups.conf` | 要移除的策略组（一行一个） |
 

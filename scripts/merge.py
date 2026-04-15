@@ -4,8 +4,15 @@ Merge upstream Shadowrocket lazy_group.conf with custom overrides.
 
 - Downloads upstream config from LOWERTOP/Shadowrocket
 - Applies key-value overrides from custom/general.conf to [General]
-- Inserts custom rules from custom/rules.conf before FINAL in [Rule]
+  (use '__DELETE__' as value to remove a key entirely from upstream)
+- Splits custom/rules.conf at '# --- pre-final ---':
+    - Rules ABOVE the marker → inserted at the very top of [Rule],
+      before all upstream service rules (ensures advertising REJECT /
+      .cn direct / Scholar direct match first)
+    - Rules BELOW the marker → inserted immediately before FINAL
+  If the marker is absent, all rules are treated as pre-final (backwards compatible).
 - Appends custom URL rewrites from custom/url_rewrite.conf to [URL Rewrite]
+  (file is silently skipped when it contains only comments or whitespace)
 - Removes proxy groups listed in custom/remove_groups.conf and their associated rules
 """
 
@@ -21,6 +28,13 @@ UPSTREAM_URL = (
 ROOT = Path(__file__).resolve().parent.parent
 CUSTOM_DIR = ROOT / "custom"
 OUTPUT = ROOT / "lazy_group_custom.conf"
+
+# Sentinel value in general.conf: removes the key from upstream entirely.
+# Example: fallback-dns-server = __DELETE__
+_GENERAL_DELETE = "__DELETE__"
+
+# Divider in rules.conf separating top-inserted rules from pre-FINAL rules.
+_RULES_SPLIT_MARKER = "# --- pre-final ---"
 
 
 def download_upstream() -> str:
@@ -58,7 +72,13 @@ def load_custom(filename: str) -> str:
 
 
 def apply_general_overrides(body: str) -> str:
-    """Override key=value pairs in [General] section."""
+    """Override key=value pairs in [General] section.
+
+    Keys whose value is '__DELETE__' are removed from the upstream config
+    entirely, allowing deletion of keys that have no neutral override value
+    (e.g. fallback-dns-server cannot be "disabled" by setting a value —
+    it must be absent from the config).
+    """
     overrides_text = load_custom("general.conf")
     if not overrides_text:
         return body
@@ -81,21 +101,64 @@ def apply_general_overrides(body: str) -> str:
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
             if key in overrides:
-                # Preserve original indentation/comment style
-                result_lines.append(f"{key} = {overrides.pop(key)}\n")
+                val = overrides.pop(key)
+                if val == _GENERAL_DELETE:
+                    # Drop this upstream key entirely
+                    continue
+                result_lines.append(f"{key} = {val}\n")
                 continue
         result_lines.append(line)
 
-    # Append any overrides that didn't match existing keys
+    # Append overrides that had no matching upstream key (skip __DELETE__ entries)
     for key, val in overrides.items():
-        result_lines.append(f"{key} = {val}\n")
+        if val != _GENERAL_DELETE:
+            result_lines.append(f"{key} = {val}\n")
 
     return "".join(result_lines)
 
 
-def insert_rules_before_final(body: str) -> str:
-    """Insert custom rules before the FINAL line in [Rule] section."""
-    custom_rules = load_custom("rules.conf")
+def load_rules_conf() -> tuple[str, str]:
+    """Load rules.conf and split into (top_rules, prefinal_rules).
+
+    Rules above '# --- pre-final ---' are inserted at the top of [Rule],
+    before all upstream service rules, so they are evaluated first.
+    Rules below the marker are inserted immediately before FINAL.
+    Without the marker, all rules go before FINAL (backwards compatible).
+    """
+    text = load_custom("rules.conf")
+    if not text:
+        return "", ""
+    if _RULES_SPLIT_MARKER in text:
+        idx = text.index(_RULES_SPLIT_MARKER)
+        top = text[:idx].strip()
+        prefinal = text[idx + len(_RULES_SPLIT_MARKER):].strip()
+        return top, prefinal
+    return "", text
+
+
+def insert_rules_at_top(body: str, top_rules: str) -> str:
+    """Insert rules at the very top of [Rule] section, right after its header line.
+
+    Guarantees top_rules are evaluated before any upstream service rules.
+    Intended for: advertising REJECT, Scholar DIRECT, .cn DIRECT.
+    """
+    if not top_rules:
+        return body
+    lines = body.splitlines(keepends=True)
+    result = []
+    inserted = False
+    for line in lines:
+        result.append(line)
+        if not inserted and re.match(r"^\[Rule\]$", line.strip()):
+            result.append("\n# --- Top Custom Rules ---\n")
+            result.append(top_rules + "\n")
+            result.append("\n")
+            inserted = True
+    return "".join(result)
+
+
+def insert_rules_before_final(body: str, custom_rules: str) -> str:
+    """Insert custom rules immediately before the FINAL line in [Rule] section."""
     if not custom_rules:
         return body
 
@@ -149,7 +212,11 @@ def remove_proxy_groups(body: str, groups: set[str]) -> str:
 
 
 def remove_rules_for_groups(body: str, groups: set[str]) -> str:
-    """Remove rule lines whose policy references a removed group."""
+    """Remove rule lines whose policy references a removed group.
+
+    Note: matching rules are deleted, not redirected to PROXY.
+    Unmatched traffic falls through to Global / China / FINAL.
+    """
     if not groups:
         return body
     lines = body.splitlines(keepends=True)
@@ -167,12 +234,22 @@ def remove_rules_for_groups(body: str, groups: set[str]) -> str:
 
 
 def append_url_rewrites(body: str) -> str:
-    """Append custom URL rewrite rules to [URL Rewrite] section."""
-    custom_rewrites = load_custom("url_rewrite.conf")
-    if not custom_rewrites:
-        return body
+    """Append custom URL rewrite rules to [URL Rewrite] section.
 
-    return body.rstrip("\n") + "\n\n# --- Custom URL Rewrites ---\n" + custom_rewrites + "\n"
+    Silently skips the file when it contains only comments or blank lines,
+    avoiding an empty placeholder block in the generated config.
+    """
+    raw = load_custom("url_rewrite.conf")
+    if not raw:
+        return body
+    # Only append if at least one real (non-comment, non-blank) line exists
+    has_content = any(
+        line.strip() and not line.strip().startswith("#")
+        for line in raw.splitlines()
+    )
+    if not has_content:
+        return body
+    return body.rstrip("\n") + "\n\n# --- Custom URL Rewrites ---\n" + raw + "\n"
 
 
 def make_header() -> str:
@@ -186,6 +263,7 @@ def merge() -> str:
     upstream = download_upstream()
     sections = parse_sections(upstream)
     remove_groups = load_remove_groups()
+    top_rules, prefinal_rules = load_rules_conf()
 
     result_sections = []
     for name, body in sections:
@@ -195,7 +273,8 @@ def merge() -> str:
             body = remove_proxy_groups(body, remove_groups)
         elif name == "Rule":
             body = remove_rules_for_groups(body, remove_groups)
-            body = insert_rules_before_final(body)
+            body = insert_rules_at_top(body, top_rules)
+            body = insert_rules_before_final(body, prefinal_rules)
         elif name == "URL Rewrite":
             body = append_url_rewrites(body)
         result_sections.append(body)
