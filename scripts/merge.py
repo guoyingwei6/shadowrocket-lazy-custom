@@ -17,6 +17,7 @@ Merge upstream Shadowrocket lazy_group.conf with custom overrides.
 """
 
 import os
+import re
 import tempfile
 import urllib.error
 import urllib.request
@@ -31,6 +32,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CUSTOM_DIR = ROOT / "custom"
 OUTPUT = ROOT / "lazy_group_custom.conf"
 
+# Sections that must exist in the upstream config for a valid merge.
+_REQUIRED_SECTIONS = {"General", "Proxy Group", "Rule", "URL Rewrite"}
+
 # Sentinel value in general.conf: removes the key from upstream entirely.
 # Example: fallback-dns-server = __DELETE__
 _GENERAL_DELETE = "__DELETE__"
@@ -40,7 +44,11 @@ _GENERAL_DELETE = "__DELETE__"
 _RULES_SPLIT_MARKER = "# --- pre-final ---"
 
 # Trailing rule options that are not the policy name.
+# Update this set if Shadowrocket introduces new trailing options.
 _RULE_OPTIONS = {"no-resolve", "pre-matching", "extended-matching"}
+
+# Valid section header: "[Name]" or "[ Name ]", but not "[[Name]]".
+_SECTION_RE = re.compile(r"^\[([^\[\]]+)\]\s*$")
 
 
 def download_upstream() -> str:
@@ -53,7 +61,8 @@ def download_upstream() -> str:
     except urllib.error.URLError as e:
         raise SystemExit(f"[merge] Network error downloading upstream: {e.reason}") from e
     try:
-        return raw.decode("utf-8")
+        # utf-8-sig strips a leading BOM if present
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError as e:
         raise SystemExit(f"[merge] Upstream response is not valid UTF-8: {e}") from e
 
@@ -63,16 +72,21 @@ def parse_sections(text: str) -> list[tuple[str, str]]:
 
     Content before the first section header is stored with section_name=''.
     Section names are stripped to tolerate minor upstream formatting differences.
+    '[[Rule]]'-style double brackets are rejected by _SECTION_RE.
+    BOM at the very start is handled upstream via utf-8-sig decoding.
     """
     sections: list[tuple[str, str]] = []
     current_name = ""
     current_lines: list[str] = []
 
+    # Strip BOM defensively; download_upstream uses utf-8-sig but guard here too
+    text = text.lstrip("\ufeff")
+
     for line in text.splitlines(keepends=True):
-        # Match lines like "[General]" or "[Rule]", strip name for robustness
-        if line.startswith("[") and line.rstrip().endswith("]"):
+        m = _SECTION_RE.match(line)
+        if m:
             sections.append((current_name, "".join(current_lines)))
-            current_name = line.rstrip()[1:-1].strip()
+            current_name = m.group(1).strip()
             current_lines = [line]
         else:
             current_lines.append(line)
@@ -81,11 +95,23 @@ def parse_sections(text: str) -> list[tuple[str, str]]:
     return sections
 
 
+def validate_sections(sections: list[tuple[str, str]]) -> None:
+    """Raise SystemExit if any required section is missing from the upstream config."""
+    present = {name for name, _ in sections if name}
+    missing = _REQUIRED_SECTIONS - present
+    if missing:
+        raise SystemExit(
+            f"[merge] Upstream config is missing required sections: "
+            f"{', '.join(sorted(missing))}. Aborting to avoid a broken output."
+        )
+
+
 def load_custom(filename: str) -> str:
     path = CUSTOM_DIR / filename
     if not path.exists():
         return ""
-    return path.read_text("utf-8").strip()
+    # utf-8-sig handles BOM in local files too
+    return path.read_text("utf-8-sig").strip()
 
 
 def apply_general_overrides(body: str) -> str:
@@ -174,25 +200,26 @@ def load_rules_conf() -> tuple[str, str]:
 
 
 def insert_rules_at_top(body: str, top_rules: str) -> str:
-    """Insert rules at the very top of [Rule] section, after the section header.
+    """Insert rules immediately after the first content line of the Rule section.
 
-    Guarantees top_rules are evaluated before any upstream service rules.
-    Intended for: advertising REJECT, Scholar DIRECT, .cn DIRECT.
+    Since merge() already knows this is the Rule section, we insert after the
+    opening '[Rule]' header line without re-scanning for it, avoiding any
+    mismatch between parse_sections's section-name normalisation and a
+    string search inside the body.
     """
     if not top_rules:
         return body
     lines = body.splitlines(keepends=True)
-    result = []
-    inserted = False
-    for line in lines:
-        result.append(line)
-        # Exact string match — no regex needed for a literal section header
-        if not inserted and line.strip() == "[Rule]":
-            result.append("\n# --- Top Custom Rules ---\n")
-            result.append(top_rules + "\n")
-            result.append("\n")
-            inserted = True
-    return "".join(result)
+    if not lines:
+        return body
+    # lines[0] is the "[Rule]" header line; insert custom rules right after it
+    return (
+        lines[0]
+        + "\n# --- Top Custom Rules ---\n"
+        + top_rules + "\n"
+        + "\n"
+        + "".join(lines[1:])
+    )
 
 
 def insert_rules_before_final(body: str, custom_rules: str) -> str:
@@ -221,15 +248,19 @@ def insert_rules_before_final(body: str, custom_rules: str) -> str:
 
 
 def load_remove_groups() -> set[str]:
-    """Load group names to remove (case-insensitive)."""
+    """Load group names to remove (case-insensitive).
+
+    Inline comments are stripped: 'Amazon # legacy' → 'Amazon'.
+    """
     text = load_custom("remove_groups.conf")
     if not text:
         return set()
     groups = set()
     for line in text.splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            groups.add(line.lower())
+        # Strip inline comments before processing
+        line = line.split("#", 1)[0].strip()
+        if line:
+            groups.add(line.casefold())
     return groups
 
 
@@ -247,7 +278,7 @@ def remove_proxy_groups(body: str, groups: set[str]) -> str:
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             name = stripped.partition("=")[0].strip()
-            if name.lower() in groups:
+            if name.casefold() in groups:
                 continue
         result.append(line)
     return "".join(result)
@@ -258,9 +289,10 @@ def _rule_policy(parts: list[str]) -> str:
 
     Trailing options like 'no-resolve', 'pre-matching', 'extended-matching'
     are not policy names; skip them to find the actual policy field.
+    Update _RULE_OPTIONS if Shadowrocket introduces new trailing options.
     """
     for part in reversed(parts):
-        if part.strip().lower() not in _RULE_OPTIONS:
+        if part.strip().casefold() not in _RULE_OPTIONS:
             return part.strip()
     return parts[-1].strip()
 
@@ -279,7 +311,7 @@ def remove_rules_for_groups(body: str, groups: set[str]) -> str:
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
             parts = stripped.split(",")
-            if len(parts) >= 2 and _rule_policy(parts).lower() in groups:
+            if len(parts) >= 2 and _rule_policy(parts).casefold() in groups:
                 continue
         result.append(line)
     return "".join(result)
@@ -310,7 +342,7 @@ def make_header() -> str:
     Uses str.replace instead of str.format so that literal braces in
     header.conf never cause a KeyError.
     """
-    template = (CUSTOM_DIR / "header.conf").read_text("utf-8")
+    template = (CUSTOM_DIR / "header.conf").read_text("utf-8-sig")
     beijing = timezone(timedelta(hours=8))
     date = datetime.now(beijing).strftime("%Y-%m-%d")
     return template.replace("{date}", date)
@@ -319,6 +351,7 @@ def make_header() -> str:
 def merge() -> str:
     upstream = download_upstream()
     sections = parse_sections(upstream)
+    validate_sections(sections)
     remove_groups = load_remove_groups()
     top_rules, prefinal_rules = load_rules_conf()
 

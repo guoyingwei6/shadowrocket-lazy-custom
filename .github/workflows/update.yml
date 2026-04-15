@@ -11,6 +11,11 @@ on:
       - 'scripts/**'
   workflow_dispatch:
 
+# 防止定时任务与手动/推送触发并发运行，避免 git push 冲突
+concurrency:
+  group: update-lazy-group
+  cancel-in-progress: false
+
 jobs:
   merge:
     runs-on: ubuntu-latest
@@ -43,6 +48,7 @@ jobs:
     needs: merge
     runs-on: ubuntu-latest
     permissions:
+      contents: read   # checkout 需要读仓库权限（显式 permissions 会将未列项置为 none）
       pages: write
       id-token: write
     environment:
