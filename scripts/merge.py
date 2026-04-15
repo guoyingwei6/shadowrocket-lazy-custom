@@ -33,7 +33,10 @@ CUSTOM_DIR = ROOT / "custom"
 OUTPUT = ROOT / "lazy_group_custom.conf"
 
 # Sections that must exist in the upstream config for a valid merge.
-_REQUIRED_SECTIONS = {"General", "Proxy Group", "Rule", "URL Rewrite"}
+# 'URL Rewrite' is intentionally excluded: it is optional in valid Shadowrocket
+# configs and may be absent in future upstream variants. Custom rewrites are
+# silently skipped if the section is missing.
+_REQUIRED_SECTIONS = {"General", "Proxy Group", "Rule"}
 
 # Sentinel value in general.conf: removes the key from upstream entirely.
 # Example: fallback-dns-server = __DELETE__
@@ -188,8 +191,8 @@ def load_rules_conf() -> tuple[str, str]:
         return "", text
 
     if len(marker_indexes) > 1:
-        raise ValueError(
-            f"rules.conf contains {len(marker_indexes)} occurrences of "
+        raise SystemExit(
+            f"[merge] rules.conf contains {len(marker_indexes)} occurrences of "
             f"{_RULES_SPLIT_MARKER!r}; expected exactly one."
         )
 
@@ -212,7 +215,14 @@ def insert_rules_at_top(body: str, top_rules: str) -> str:
     lines = body.splitlines(keepends=True)
     if not lines:
         return body
-    # lines[0] is the "[Rule]" header line; insert custom rules right after it
+    # Invariant: lines[0] must be the section header (e.g. "[Rule]\n").
+    # merge() only calls this function for the Rule section, so parse_sections()
+    # guarantees lines[0] is the header. Assert here to catch future regressions.
+    if not _SECTION_RE.match(lines[0].strip()):
+        raise SystemExit(
+            f"[merge] insert_rules_at_top: expected a section header as the first "
+            f"line of the Rule body, got: {lines[0]!r}"
+        )
     return (
         lines[0]
         + "\n# --- Top Custom Rules ---\n"

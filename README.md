@@ -33,7 +33,7 @@
 |------|------|
 | `custom/header.conf` | 配置文件头部模板 (核心特性、更新日志，`{date}` 自动替换为构建日期) |
 | `custom/general.conf` | `[General]` 键值覆盖 (如 `dns-server`、`fallback-dns-server`) |
-| `custom/rules.conf` | 自定义分流规则 (插入到 FINAL 之前) |
+| `custom/rules.conf` | 自定义分流规则；`# --- pre-final ---` 分隔符以上插入 `[Rule]` 最前端，以下插入 FINAL 之前 |
 | `custom/url_rewrite.conf` | 额外 URL Rewrite 规则 |
 | `custom/remove_groups.conf` | 要移除的策略组 (一行一个) |
 
