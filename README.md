@@ -32,7 +32,7 @@
 | 文件 | 作用 |
 |------|------|
 | `custom/header.conf` | 配置文件头部模板 (核心特性、更新日志，`{date}` 自动替换为构建日期) |
-| `custom/general.conf` | `[General]` 键值覆盖 (如 `dns-server`、`fallback-dns-server`) |
+| `custom/general.conf` | `[General]` 键值覆盖；值设为 `__DELETE__` 可将该键从上游配置中完全删除（如 `fallback-dns-server = __DELETE__`） |
 | `custom/rules.conf` | 自定义分流规则；`# --- pre-final ---` 分隔符以上插入 `[Rule]` 最前端，以下插入 FINAL 之前 |
 | `custom/url_rewrite.conf` | 额外 URL Rewrite 规则 |
 | `custom/remove_groups.conf` | 要移除的策略组 (一行一个) |
@@ -55,7 +55,7 @@
 
 | 日期 | 内容 |
 |------|------|
-| 2026-04-15 | 规则位置修正：广告/学术/.cn 规则移至 `[Rule]` 最前端；修复 `fallback-dns-server = system` 未删除问题（`merge.py` 新增 `__DELETE__` 语义）；清理冗余手写域名（Gmail、Gemini 子域等） |
+| 2026-04-15 | 规则位置修正：广告/学术/.cn 规则移至 `[Rule]` 最前端；修复 `fallback-dns-server = system` 未删除问题（`merge.py` 新增 `__DELETE__` 语义）；清理冗余手写域名（Gmail、Gemini 子域等）；`merge.py` 经六轮深度 debug 加固：修复规则分隔符匹配、重复 section 检测、`no-resolve` 策略提取、BOM 处理等逻辑错误；新增 pre-flight 校验（缺失 section、内置策略误删防护、custom rule 引用已删除组检测）；加入网络超时、原子写入、统一错误信息 |
 | 2026-04-10 | DNS 防泄漏加固：移除阿里/腾讯 DoH（出口 IP 走移动骨干被误判为运营商 DNS），去除 fallback（明文被透明代理劫持），仅保留自建 DoH + Cloudflare |
 | 2026-04-01 | WebRTC 真实 IP 防泄漏 (`stun-response-ip`)；修正 QUIC 屏蔽范围（仅代理连接，直连保留 HTTP/3）；DNS 安全加固（禁用系统 DNS 回落、直连 DNS 不走代理）|
 | 2026-03-22 | 自建 DoH 加密 DNS + 阿里/腾讯明文 DNS 兜底，杜绝运营商 DNS；头部模板提取到 `custom/header.conf` |
