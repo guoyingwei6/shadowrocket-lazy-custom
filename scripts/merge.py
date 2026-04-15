@@ -194,7 +194,7 @@ def load_rules_conf() -> tuple[str, str]:
     '# --- pre-final ---'. A substring match is intentionally avoided
     to prevent false matches inside comment text that mentions the marker.
 
-    Raises ValueError if the marker appears more than once.
+    Raises SystemExit if the marker appears more than once.
     Rules above the marker are inserted at the top of [Rule].
     Rules below are inserted before FINAL.
     Without the marker, all rules go before FINAL (backwards compatible).
