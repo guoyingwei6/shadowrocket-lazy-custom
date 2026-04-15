@@ -36,8 +36,18 @@ OUTPUT = ROOT / "lazy_group_custom.conf"
 # Sections that must exist in the upstream config for a valid merge.
 # 'URL Rewrite' is intentionally excluded: it is optional in valid Shadowrocket
 # configs and may be absent in future upstream variants. Custom rewrites are
-# silently skipped if the section is missing.
+# synthesized as a new section when the upstream section is missing.
 _REQUIRED_SECTIONS = {"General", "Proxy Group", "Rule"}
+
+# Sections that the script mutates; duplicate detection covers all of these
+# so custom content is never double-inserted.
+_MUTATED_SECTIONS = _REQUIRED_SECTIONS | {"URL Rewrite"}
+
+# Built-in Shadowrocket policy names that are not user-created proxy groups.
+# remove_groups.conf must not contain these — removing them would silently
+# delete large portions of the rule set.
+_BUILTIN_POLICIES = {"direct", "proxy", "reject", "final", "mitm"}
+_BUILTIN_POLICY_PREFIXES = ("reject-",)  # covers REJECT-TINYGIF, REJECT-DROP, etc.
 
 # Sentinel value in general.conf: removes the key from upstream entirely.
 # Example: fallback-dns-server = __DELETE__
@@ -111,13 +121,13 @@ def validate_sections(sections: list[tuple[str, str]]) -> None:
             f"{', '.join(sorted(missing))}. Aborting to avoid a broken output."
         )
 
-    # Duplicate required sections would cause custom rules to be inserted twice
+    # Duplicate mutated sections would cause custom content to be inserted twice
     counts = Counter(names)
-    duplicates = {name for name, count in counts.items() if count > 1} & _REQUIRED_SECTIONS
+    duplicates = {name for name, count in counts.items() if count > 1} & _MUTATED_SECTIONS
     if duplicates:
         raise SystemExit(
             f"[merge] Upstream config contains duplicate sections: "
-            f"{', '.join(sorted(duplicates))}. Aborting to avoid double-inserting custom rules."
+            f"{', '.join(sorted(duplicates))}. Aborting to avoid double-inserting custom content."
         )
 
 
@@ -288,6 +298,24 @@ def load_remove_groups() -> set[str]:
     return groups
 
 
+def validate_remove_groups(groups: set[str]) -> None:
+    """Raise SystemExit if remove_groups.conf contains a built-in policy name.
+
+    Built-in policies (DIRECT, PROXY, REJECT, FINAL, MITM and REJECT-* variants)
+    are not user-created proxy groups. Listing them in remove_groups.conf would
+    silently delete every rule that references them, producing a broken config.
+    """
+    for group in groups:
+        if group in _BUILTIN_POLICIES or any(
+            group.startswith(prefix) for prefix in _BUILTIN_POLICY_PREFIXES
+        ):
+            raise SystemExit(
+                f"[merge] remove_groups.conf contains built-in policy name "
+                f"{group!r}. Built-in policies (DIRECT, PROXY, REJECT, FINAL, MITM) "
+                f"cannot be removed — delete this entry from remove_groups.conf."
+            )
+
+
 def remove_proxy_groups(body: str, groups: set[str]) -> str:
     """Remove specified proxy group definitions from [Proxy Group] section.
 
@@ -365,10 +393,10 @@ def append_url_rewrites(body: str) -> str:
 
 
 def synthesize_url_rewrite_section() -> str:
-    """Build a new [URL Rewrite] section from url_rewrite.conf.
+    """Build a new [URL Rewrite] section body from url_rewrite.conf.
 
     Called when the upstream config has no [URL Rewrite] section but custom
-    rewrite content exists; the new section is appended to the output.
+    rewrite content exists. Returns an empty string if there is nothing to add.
     """
     raw = _url_rewrite_raw_content()
     if not raw:
@@ -419,6 +447,7 @@ def merge() -> str:
     sections = parse_sections(upstream)
     validate_sections(sections)
     remove_groups = load_remove_groups()
+    validate_remove_groups(remove_groups)
     top_rules, prefinal_rules = load_rules_conf()
     validate_custom_rules_groups(top_rules, prefinal_rules, remove_groups)
 
@@ -439,11 +468,20 @@ def merge() -> str:
         result_sections.append(body)
 
     # If upstream had no [URL Rewrite] section but custom content exists,
-    # synthesize and append the section rather than silently discarding it.
+    # synthesize the section and insert it before [MITM] (the standard upstream
+    # position) or append to EOF if [MITM] is absent.
     if not url_rewrite_handled:
         synthetic = synthesize_url_rewrite_section()
         if synthetic:
-            result_sections.append(synthetic)
+            mitm_idx = next(
+                (i for i, body in enumerate(result_sections)
+                 if body.lstrip().startswith("[MITM]")),
+                None,
+            )
+            if mitm_idx is not None:
+                result_sections.insert(mitm_idx, synthetic)
+            else:
+                result_sections.append(synthetic)
 
     return make_header() + "\n" + "".join(result_sections)
 
