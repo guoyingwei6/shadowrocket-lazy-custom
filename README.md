@@ -55,6 +55,7 @@
 
 | 日期 | 内容 |
 |------|------|
+| 2026-04-16 | 修复 AI/谷歌补充规则被 Global RULE-SET 抢先匹配的问题：blackmatrix7 OpenAI/Claude/Gemini + 手动兜底域名 + 谷歌补充全部移至 `[Rule]` 最前端，确保走 AI/谷歌服务策略组；`ai-to-isp.sgmodule` 补全 `anthropic.com` / `claudeusercontent.com`；清理输出中的冗余注释；`merge.py` General 追加键尾部格式修复 |
 | 2026-04-15 | 规则位置修正：广告/学术/.cn 规则移至 `[Rule]` 最前端；修复 `fallback-dns-server = system` 未删除问题（`merge.py` 新增 `__DELETE__` 语义）；清理冗余手写域名（Gmail、Gemini 子域等）；`merge.py` 经六轮深度 debug 加固：修复规则分隔符匹配、重复 section 检测、`no-resolve` 策略提取、BOM 处理等逻辑错误；新增 pre-flight 校验（缺失 section、内置策略误删防护、custom rule 引用已删除组检测）；加入网络超时、原子写入、统一错误信息 |
 | 2026-04-10 | DNS 防泄漏加固：移除阿里/腾讯 DoH（出口 IP 走移动骨干被误判为运营商 DNS），去除 fallback（明文被透明代理劫持），仅保留自建 DoH + Cloudflare |
 | 2026-04-01 | WebRTC 真实 IP 防泄漏 (`stun-response-ip`)；修正 QUIC 屏蔽范围（仅代理连接，直连保留 HTTP/3）；DNS 安全加固（禁用系统 DNS 回落、直连 DNS 不走代理）|
