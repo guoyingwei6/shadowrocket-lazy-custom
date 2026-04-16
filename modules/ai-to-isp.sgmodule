@@ -7,6 +7,8 @@ RULE-SET,https://raw.githubusercontent.com/iab0x00/ProxyRules/main/Rule/AI.txt,�
 RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/OpenAI/OpenAI.list,家宽IP
 RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/Claude/Claude.list,家宽IP
 RULE-SET,https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Shadowrocket/Gemini/Gemini.list,家宽IP
+DOMAIN-SUFFIX,anthropic.com,家宽IP
+DOMAIN-SUFFIX,claudeusercontent.com,家宽IP
 DOMAIN-SUFFIX,x.ai,家宽IP
 DOMAIN-SUFFIX,grok.com,家宽IP
 DOMAIN-SUFFIX,perplexity.ai,家宽IP
