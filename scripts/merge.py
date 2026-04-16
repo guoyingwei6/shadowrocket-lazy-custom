@@ -180,9 +180,17 @@ def apply_general_overrides(body: str) -> str:
         result_lines.append(line)
 
     # Append overrides that had no matching upstream key (skip __DELETE__ entries)
-    for key, val in overrides.items():
-        if key not in seen_keys and val != _GENERAL_DELETE:
-            result_lines.append(f"{key} = {val}\n")
+    new_keys = [
+        f"{key} = {val}\n"
+        for key, val in overrides.items()
+        if key not in seen_keys and val != _GENERAL_DELETE
+    ]
+    if new_keys:
+        if result_lines and result_lines[-1].strip():
+            result_lines.append("\n")
+        result_lines.extend(new_keys)
+        # Trailing blank line so appended keys don't run into the next section header
+        result_lines.append("\n")
 
     return "".join(result_lines)
 
