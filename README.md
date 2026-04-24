@@ -14,7 +14,8 @@
 6. **代理连接 QUIC 屏蔽 + IPv6 关闭** — 仅对走代理的连接屏蔽 QUIC（强制回退 HTTP/2），直连流量可正常使用 HTTP/3；关闭 IPv6 防止泄漏
 7. **.cn 域名最前端直连** — 插入 `[Rule]` 最前端，域名层面短路所有 .cn 请求，完全跳过 GEOIP DNS 查询开销
 8. **WebRTC 真实 IP 防泄漏** — `stun-response-ip` 返回虚假 IP，防止 WebRTC STUN 绕过代理暴露真实 IP
-9. **DNS 防泄漏加固** — 仅使用自建 DoH + Cloudflare；从上游配置中删除 `fallback-dns-server`；禁用系统 DNS 回落与直连 DNS 代理回退
+9. **DNS 分层策略** — 直连流量用系统 DNS（快速解析国内域名，避免绕道 DoH）；代理流量用自建 DoH + Cloudflare（防泄漏）；删除 `fallback-dns-server`，禁用系统 DNS 回落
+10. **微信专项直连** — Shadowrocket 格式 WeChat 规则集插入 `[Rule]` 最前端，修复上游 QuantumultX 格式漏匹配导致微信域名走代理的问题
 
 ## 订阅地址
 
@@ -50,11 +51,14 @@
 | 低频策略组 | YouTube/Netflix/Facebook/Amazon 等 8 个 | 已裁剪，流量由 Global / FINAL 兜底 |
 | WebRTC 防泄漏 | 未启用 | `stun-response-ip` 返回虚假 IP |
 | DNS 防泄漏 | 明文回落 | 仅自建 DoH + Cloudflare；删除 `fallback-dns-server`；禁用系统 DNS 回落 |
+| 直连 DNS | DoH（慢） | 系统 DNS（`dns-direct-system=true`），国内域名解析更快 |
+| 微信规则 | QuantumultX 格式（漏匹配） | 额外插入 Shadowrocket 格式 WeChat 规则集，确保微信走直连 |
 
 ## 更新日志
 
 | 日期 | 内容 |
 |------|------|
+| 2026-04-24 | 修复微信消息延迟：`dns-direct-system=true` 让直连走系统 DNS，国内域名不再绕道 DoH；补充 Shadowrocket 格式 WeChat 规则集插入最前端，修复上游 QuantumultX 格式漏匹配问题 |
 | 2026-04-16 | 修复 AI/谷歌补充规则被 Global RULE-SET 抢先匹配的问题：blackmatrix7 OpenAI/Claude/Gemini + 手动兜底域名 + 谷歌补充全部移至 `[Rule]` 最前端，确保走 AI/谷歌服务策略组；`ai-to-isp.sgmodule` 补全 `anthropic.com` / `claudeusercontent.com`；清理输出中的冗余注释；`merge.py` General 追加键尾部格式修复 |
 | 2026-04-15 | 规则位置修正：广告/学术/.cn 规则移至 `[Rule]` 最前端；修复 `fallback-dns-server = system` 未删除问题（`merge.py` 新增 `__DELETE__` 语义）；清理冗余手写域名（Gmail、Gemini 子域等）；`merge.py` 经六轮深度 debug 加固：修复规则分隔符匹配、重复 section 检测、`no-resolve` 策略提取、BOM 处理等逻辑错误；新增 pre-flight 校验（缺失 section、内置策略误删防护、custom rule 引用已删除组检测）；加入网络超时、原子写入、统一错误信息 |
 | 2026-04-10 | DNS 防泄漏加固：移除阿里/腾讯 DoH（出口 IP 走移动骨干被误判为运营商 DNS），去除 fallback（明文被透明代理劫持），仅保留自建 DoH + Cloudflare |
