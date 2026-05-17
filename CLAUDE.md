@@ -15,6 +15,7 @@
 | `general.conf` | `[General]` 键值覆盖；值设为 `__DELETE__` 可将该键从上游配置中删除 |
 | `rules.conf` | 自定义分流规则；`# --- pre-final ---` 分隔符以上插入 `[Rule]` 最前端，以下插入 FINAL 之前 |
 | `url_rewrite.conf` | 额外 URL Rewrite 规则 |
+| `mitm.conf` | `[MITM]` 键值覆盖；格式同 `general.conf`，值设为 `__DELETE__` 可删除该键 |
 | `remove_groups.conf` | 要移除的策略组（一行一个） |
 
 ## 重要注意事项

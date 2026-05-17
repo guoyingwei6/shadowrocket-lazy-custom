@@ -139,14 +139,14 @@ def load_custom(filename: str) -> str:
     return path.read_text("utf-8-sig").strip()
 
 
-def apply_general_overrides(body: str) -> str:
-    """Override key=value pairs in [General] section.
+def apply_general_overrides(body: str, custom_file: str = "general.conf") -> str:
+    """Override key=value pairs in a config section.
 
     Keys whose value is '__DELETE__' are removed from the upstream config
     entirely. All occurrences of a key are replaced/removed (not just the
     first), so duplicate upstream keys are handled correctly.
     """
-    overrides_text = load_custom("general.conf")
+    overrides_text = load_custom(custom_file)
     if not overrides_text:
         return body
 
@@ -473,6 +473,8 @@ def merge() -> str:
         elif name == "URL Rewrite":
             body = append_url_rewrites(body)
             url_rewrite_handled = True
+        elif name == "MITM":
+            body = apply_general_overrides(body, "mitm.conf")
         result_sections.append(body)
 
     # If upstream had no [URL Rewrite] section but custom content exists,
