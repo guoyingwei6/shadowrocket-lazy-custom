@@ -17,6 +17,7 @@
 9. **DNS 分层策略** — 直连流量用系统 DNS（快速解析国内域名，避免绕道 DoH）；代理流量用自建 DoH + Cloudflare（防泄漏）；删除 `fallback-dns-server`，禁用系统 DNS 回落
 10. **微信专项直连** — Shadowrocket 格式 WeChat 规则集插入 `[Rule]` 最前端，修复上游 QuantumultX 格式漏匹配导致微信域名走代理的问题
 11. **中国移动专项直连** — blackmatrix7 ChinaMobile 规则集直连，避免中国移动 App 检测到代理而拒绝充值等操作
+12. **iCost 专项直连** — `icostapp.com` 域名直连，避免记账同步/接口访问被代理策略干扰
 
 ## 订阅地址
 
@@ -37,6 +38,7 @@
 | `custom/general.conf` | `[General]` 键值覆盖；值设为 `__DELETE__` 可将该键从上游配置中完全删除（如 `fallback-dns-server = __DELETE__`） |
 | `custom/rules.conf` | 自定义分流规则；`# --- pre-final ---` 分隔符以上插入 `[Rule]` 最前端，以下插入 FINAL 之前 |
 | `custom/url_rewrite.conf` | 额外 URL Rewrite 规则 |
+| `custom/mitm.conf` | `[MITM]` 键值覆盖；格式同 `general.conf`，值设为 `__DELETE__` 可删除该键 |
 | `custom/remove_groups.conf` | 要移除的策略组 (一行一个) |
 
 ## 与上游的差异
@@ -55,11 +57,13 @@
 | 直连 DNS | DoH（慢） | 系统 DNS（`dns-direct-system=true`），国内域名解析更快 |
 | 微信规则 | QuantumultX 格式（漏匹配） | 额外插入 Shadowrocket 格式 WeChat 规则集，确保微信走直连 |
 | 中国移动 | 无 | blackmatrix7 ChinaMobile 规则集直连，避免 App 检测代理拒绝充值 |
+| iCost | 无 | `icostapp.com` 直连，避免常用 App 同步流量被误代理 |
 
 ## 更新日志
 
 | 日期 | 内容 |
 |------|------|
+| 2026-06-16 | iCost 直连：`icostapp.com` 插入 `[Rule]` 最前端，避免记账同步/接口访问被代理策略干扰 |
 | 2026-05-22 | 中国移动直连：blackmatrix7 ChinaMobile 规则集插入 `[Rule]` 最前端，避免中国移动 App 检测到代理而拒绝充值 |
 | 2026-04-24 | 修复微信消息延迟：`dns-direct-system=true` 让直连走系统 DNS，国内域名不再绕道 DoH；补充 Shadowrocket 格式 WeChat 规则集插入最前端，修复上游 QuantumultX 格式漏匹配问题 |
 | 2026-04-16 | 修复 AI/谷歌补充规则被 Global RULE-SET 抢先匹配的问题：blackmatrix7 OpenAI/Claude/Gemini + 手动兜底域名 + 谷歌补充全部移至 `[Rule]` 最前端，确保走 AI/谷歌服务策略组；`ai-to-isp.sgmodule` 补全 `anthropic.com` / `claudeusercontent.com`；清理输出中的冗余注释；`merge.py` General 追加键尾部格式修复 |
